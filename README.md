@@ -1,92 +1,110 @@
-<p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=8BE9FD&height=220&section=header&text=HydroToDo&fontSize=40&fontColor=F8F8F2" alt="HydroToDo Header" />
-</p>
+<h1 align="center">HydroToDo</h1>
 
-HydroToDo é um gerenciador de tarefas para terminal, escrito em Python, que permite organizar, marcar e visualizar suas tarefas de forma prática e estilizada, utilizando uma interface TUI (Text User Interface) com `curses`.
+<p align="center">
+  <b>HydroToDo</b> is a stylish, terminal-based task manager written in Python.<br>
+  It allows you to organize, check off, and visualize your to-dos efficiently using a modern Text User Interface (TUI) built with <code>curses</code>.<br>
+  With features like tabbed lists, interactive help, and keyboard shortcuts, HydroToDo brings ease and clarity to your daily workflow.
+</p>
 
 ---
 
-## Funcionalidades
+## Features
 
-*   Adição, remoção e marcação de tarefas como concluídas.
-*   Interface com abas para múltiplas listas de tarefas.
-*   Caixa de tarefas desenhada em ASCII com bordas arredondadas.
-*   Ajuda interativa acessível pelo próprio programa.
-*   Suporte a atalhos de teclado para navegação rápida.
-*   Atualização dinâmica da lista de tarefas.
-*   Suporte a redimensionamento mínimo do terminal.
+- **Add, Remove, and Complete Tasks:**  
+  Easily manage your to-do list—add new tasks, mark as done, or delete with a keystroke.
+- **Tabbed Lists:**  
+  Organize your tasks into multiple categories, each in its own tab.
+- **ASCII Rounded Box UI:**  
+  Tasks are displayed in visually appealing boxes with rounded ASCII borders for readability.
+- **Interactive Help:**  
+  Quickly access shortcut keys and usage instructions from within the app.
+- **Keyboard Shortcuts:**  
+  Fast navigation and task management using intuitive hotkeys.
+- **Live Updates:**  
+  Your task list refreshes dynamically with every change.
+- **Responsive Design:**  
+  Handles terminal resizing and warns if the window is too small.
 
 ---
 
 ## Preview
 
-![Screenshot](screenshot.png)
+<p align="center">
+  <img src="screenshot.png" alt="HydroToDo Screenshot" width="700"/>
+</p>
 
 ---
 
-## Requisitos
+## Requirements
 
-*   Python 3.6 ou superior
-*   Biblioteca padrão `sqlite3` (já inclusa no Python)
-*   Terminal compatível com `curses` (Linux, macOS, WSL)
+- **Python**: Version 3.6 or higher
+- **sqlite3**: Standard library (included with Python)
+- **curses**: Terminal interface (native on Linux/macOS/WSL)
 
-> **Atenção:** Suporte oficial apenas para Linux, macOS e WSL. Usuários Windows podem tentar rodar instalando o pacote `windows-curses`, mas não há garantia de funcionamento ou suporte.
+> **Note:** Officially supported on Linux, macOS, and WSL.  
+> Windows users may try running HydroToDo with the `windows-curses` package, but compatibility and support are **not guaranteed**.
 
 ---
 
-## Instalação
+## Installation
 
-Clone o repositório e acesse a pasta do projeto:
+Clone the repository and navigate to the project folder:
 
 ```bash
- git clone https://github.com/Henriquehnnm/HydroClock-Project.git
- cd HydroClock-Project/HydroToDo
+git clone https://github.com/Henriquehnnm/HydroToDo.git
+cd HydroToDo
+```
+If on Windows:
+```bash
+pip install windows-curses
 ```
 
 ---
 
-## Uso
+## Usage
 
-Execute o script diretamente pelo terminal:
+Run the script directly from your terminal:
 
 ```bash
 python3 hydrotodo.py
 ```
 
-### Atalhos principais
+### Main Shortcuts
 
-- `↑`/`↓` : Navegar entre tarefas
-- `Enter` : Marcar/desmarcar tarefa
-- `a`     : Adicionar nova tarefa
-- `d`     : Deletar tarefa selecionada
-- `Ctrl+T`: Nova aba
-- `Ctrl+W`: Fechar aba
-- `←`/`→` : Trocar aba
-- `h`     : Mostrar/ocultar ajuda
-- `q`     : Sair do programa
-
----
-
-## Estrutura do Código
-
-*   Uso da biblioteca `curses` para criar a interface interativa.
-*   Funções para desenhar caixas arredondadas em ASCII.
-*   Persistência das tarefas em banco de dados SQLite local.
-*   Suporte a múltiplas abas e atalhos de teclado.
-*   Tratamento para evitar erros ao desenhar em terminais pequenos.
+- <kbd>↑</kbd>/<kbd>↓</kbd> : Navigate tasks
+- <kbd>Enter</kbd>           : Check/uncheck task
+- <kbd>a</kbd>               : Add new task
+- <kbd>d</kbd>               : Delete selected task
+- <kbd>Ctrl+T</kbd>          : New tab (category)
+- <kbd>Ctrl+W</kbd>          : Close current tab
+- <kbd>←</kbd>/<kbd>→</kbd>  : Switch tabs
+- <kbd>h</kbd>               : Show/hide help
+- <kbd>q</kbd>               : Quit the app
 
 ---
 
-## Considerações
+## Code Structure
 
-HydroToDo está em desenvolvimento contínuo e ainda está em **Beta**. Sugestões e contribuições são bem-vindas via issues ou pull requests no repositório.
+- **Interactive TUI:**  
+  Built with the `curses` library for a smooth and keyboard-driven experience.
+- **Rounded Box Drawing:**  
+  Custom functions for rendering rounded ASCII boxes.
+- **SQLite Persistence:**  
+  Tasks are stored locally in a SQLite database for reliability.
+- **Tabs and Shortcuts:**  
+  Multiple categories managed via tabs and keyboard shortcuts.
+- **Error Handling:**  
+  Graceful handling of very small terminals and input errors.
 
 ---
 
-## Contato
+## Contributing
 
-Para dúvidas ou sugestões, abra uma issue ou entre em contato via email.
+HydroToDo is under active development and currently in **Beta**.  
+Suggestions and contributions are welcome via [issues](https://github.com/Henriquehnnm/HydroToDo/issues) or [pull requests](https://github.com/Henriquehnnm/HydroToDo/pulls).
 
-<p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=8BE9FD&height=120&section=footer" alt="HydroToDo Footer" />
-</p>
+---
+
+## Contact
+
+For questions or suggestions, please [open an issue](https://github.com/Henriquehnnm/HydroToDo/issues) or contact via email.
