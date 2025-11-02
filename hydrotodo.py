@@ -249,7 +249,7 @@ def main(stdscr):
                         todo = todos[i]
                         prefix = "[X] " if todo['done'] else "[ ] "
                         line = prefix + todo['text']
-                        attr = curses.color_pair(1) | curses.A_BOLD if i == current_index else 0
+                        attr = curses.color_pair(2) | curses.A_BOLD if i == current_index else 0
                         stdscr.addstr(box_y + 2 + idx, box_x + 2, line[:box_w-4], attr)
             # Scroll indicators
             if start > 0:
