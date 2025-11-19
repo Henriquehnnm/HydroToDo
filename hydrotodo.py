@@ -226,7 +226,7 @@ def main(stdscr):
                 current_indices[current_tab] = max(0, len(todos) - 1)
             current_index = current_indices[current_tab]
             # SCROLL
-            max_visible = box_h - 4
+            max_visible = max(1, box_h - 4)
             if len(todos) > max_visible:
                 if current_index < max_visible // 2:
                     start = 0
