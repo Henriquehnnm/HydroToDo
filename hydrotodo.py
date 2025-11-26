@@ -1,6 +1,7 @@
 import curses
 import sqlite3
 import os
+from datetime import datetime
 
 # HydroToDo Stable
 # Characters for rounded border
@@ -31,7 +32,10 @@ def init_db():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     text TEXT NOT NULL,
                     done INTEGER NOT NULL DEFAULT 0,
-                    category TEXT NOT NULL DEFAULT 'General'
+                    category TEXT NOT NULL DEFAULT 'General',
+                    notes TEXT NOT NULL DEFAULT '',
+                    created_at TEXT,
+                    note_updated_at TEXT
                 )''')
     c.execute('''CREATE TABLE IF NOT EXISTS deleted_categories (
                     name TEXT PRIMARY KEY
@@ -40,6 +44,12 @@ def init_db():
     columns = [row[1] for row in c.fetchall()]
     if 'category' not in columns:
         c.execute("ALTER TABLE todos ADD COLUMN category TEXT NOT NULL DEFAULT 'General'")
+    if 'notes' not in columns:
+        c.execute("ALTER TABLE todos ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
+    if 'created_at' not in columns:
+        c.execute("ALTER TABLE todos ADD COLUMN created_at TEXT")
+    if 'note_updated_at' not in columns:
+        c.execute("ALTER TABLE todos ADD COLUMN note_updated_at TEXT")
     conn.commit()
     conn.close()
 
@@ -47,8 +57,15 @@ def init_db():
 def load_todos(category='General'):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('SELECT id, text, done FROM todos WHERE category = ?', (category,))
-    todos = [{'id': row[0], 'text': row[1], 'done': bool(row[2])} for row in c.fetchall()]
+    c.execute('SELECT id, text, done, notes, created_at, note_updated_at FROM todos WHERE category = ?', (category,))
+    todos = [{
+        'id': row[0],
+        'text': row[1],
+        'done': bool(row[2]),
+        'notes': row[3],
+        'created_at': row[4],
+        'note_updated_at': row[5]
+    } for row in c.fetchall()]
     conn.close()
     return todos
 
@@ -56,7 +73,8 @@ def load_todos(category='General'):
 def add_todo(text, category='General'):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('INSERT INTO todos (text, done, category) VALUES (?, 0, ?)', (text, category))
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    c.execute('INSERT INTO todos (text, done, category, created_at) VALUES (?, 0, ?, ?)', (text, category, created_at))
     conn.commit()
     conn.close()
 
@@ -73,6 +91,15 @@ def delete_todo(todo_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('DELETE FROM todos WHERE id = ?', (todo_id,))
+    conn.commit()
+    conn.close()
+
+
+def update_todo_notes(todo_id, notes):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    note_updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    c.execute('UPDATE todos SET notes = ?, note_updated_at = ? WHERE id = ?', (notes, note_updated_at, todo_id))
     conn.commit()
     conn.close()
 
@@ -109,6 +136,184 @@ def draw_rounded_box(win, y, x, h, w):
     win.addstr(y + h - 1, x, BL + H * (w - 2) + BR)
 
 
+def wrap_text(text, width):
+    """Wrap text to fit within a given width, returning a list of lines."""
+    if width <= 0:
+        return [text]
+    lines = []
+    while len(text) > width:
+        # Find the last space within the width limit
+        split_at = text.rfind(' ', 0, width)
+        if split_at == -1:
+            # No space found, hard break at width
+            split_at = width
+        lines.append(text[:split_at])
+        text = text[split_at:].lstrip()
+    if text:
+        lines.append(text)
+    return lines if lines else ['']
+
+
+def get_wrapped_input(stdscr, start_y, start_x, width, max_lines, prompt=""):
+    """Get user input with text wrapping support."""
+    curses.curs_set(2)  # Block cursor
+    text = ""
+
+    while True:
+        # Clear the input area
+        for i in range(max_lines):
+            stdscr.addstr(start_y + i, start_x, " " * width)
+
+        # Display prompt and wrapped text
+        full_text = prompt + text
+        wrapped = wrap_text(full_text, width)
+
+        for i, line in enumerate(wrapped[:max_lines]):
+            stdscr.addstr(start_y + i, start_x, line)
+
+        # Position cursor at the end of text
+        if wrapped:
+            cursor_line = min(len(wrapped) - 1, max_lines - 1)
+            cursor_col = len(wrapped[cursor_line])
+            stdscr.move(start_y + cursor_line, start_x + cursor_col)
+
+        stdscr.refresh()
+        key = stdscr.getch()
+
+        if key == ord('\n'):  # Enter - submit
+            break
+        elif key == 27:  # Escape - cancel
+            text = ""
+            break
+        elif key in (curses.KEY_BACKSPACE, 127, 8):  # Backspace
+            if text:
+                text = text[:-1]
+        elif key >= 32 and key <= 126:  # Printable ASCII
+            text += chr(key)
+
+    curses.curs_set(0)  # Hide cursor
+    return text
+
+
+def edit_multiline_text(stdscr, start_y, start_x, width, height, initial_text=""):
+    """Edit multiline text with basic navigation and text wrapping. Returns edited text or None if cancelled."""
+    curses.curs_set(2)  # Block cursor
+    lines = initial_text.split('\n') if initial_text else ['']
+    cursor_line = len(lines) - 1
+    cursor_col = len(lines[cursor_line])
+    scroll_offset = 0
+
+    while True:
+        # Build wrapped display lines with mapping back to original lines
+        display_lines = []  # List of (original_line_idx, text, start_col)
+        for line_idx, line in enumerate(lines):
+            if len(line) == 0:
+                display_lines.append((line_idx, '', 0))
+            else:
+                col = 0
+                while col < len(line):
+                    chunk = line[col:col + width]
+                    display_lines.append((line_idx, chunk, col))
+                    col += width
+                if len(line) % width == 0 and len(line) > 0:
+                    # Line exactly fills width, no extra empty line needed
+                    pass
+
+        # Find which display line the cursor is on
+        cursor_display_line = 0
+        for i, (line_idx, text, start_col) in enumerate(display_lines):
+            if line_idx == cursor_line:
+                if start_col <= cursor_col < start_col + width:
+                    cursor_display_line = i
+                    break
+                elif cursor_col >= start_col:
+                    cursor_display_line = i  # Keep updating until we pass it
+
+        # Adjust scroll to keep cursor visible
+        if cursor_display_line < scroll_offset:
+            scroll_offset = cursor_display_line
+        elif cursor_display_line >= scroll_offset + height:
+            scroll_offset = cursor_display_line - height + 1
+
+        # Clear and draw the text area
+        for i in range(height):
+            stdscr.addstr(start_y + i, start_x, " " * width)
+            disp_idx = scroll_offset + i
+            if disp_idx < len(display_lines):
+                _, text, _ = display_lines[disp_idx]
+                stdscr.addstr(start_y + i, start_x, text)
+
+        # Position cursor
+        screen_cursor_line = cursor_display_line - scroll_offset
+        _, _, start_col = display_lines[cursor_display_line] if display_lines else (0, '', 0)
+        screen_cursor_col = cursor_col - start_col
+        stdscr.move(start_y + screen_cursor_line, start_x + screen_cursor_col)
+
+        stdscr.refresh()
+        key = stdscr.getch()
+
+        if key == 27:  # Escape - cancel
+            curses.curs_set(0)
+            return None
+        elif key == 6:  # Ctrl+F - save and finish
+            curses.curs_set(0)
+            return '\n'.join(lines)
+        elif key == ord('\n'):  # Enter - new line
+            # Split line at cursor
+            rest = lines[cursor_line][cursor_col:]
+            lines[cursor_line] = lines[cursor_line][:cursor_col]
+            lines.insert(cursor_line + 1, rest)
+            cursor_line += 1
+            cursor_col = 0
+        elif key in (curses.KEY_BACKSPACE, 127, 8):  # Backspace
+            if cursor_col > 0:
+                lines[cursor_line] = lines[cursor_line][:cursor_col-1] + lines[cursor_line][cursor_col:]
+                cursor_col -= 1
+            elif cursor_line > 0:
+                # Merge with previous line
+                cursor_col = len(lines[cursor_line - 1])
+                lines[cursor_line - 1] += lines[cursor_line]
+                lines.pop(cursor_line)
+                cursor_line -= 1
+        elif key == curses.KEY_DC:  # Delete
+            if cursor_col < len(lines[cursor_line]):
+                lines[cursor_line] = lines[cursor_line][:cursor_col] + lines[cursor_line][cursor_col+1:]
+            elif cursor_line < len(lines) - 1:
+                # Merge with next line
+                lines[cursor_line] += lines[cursor_line + 1]
+                lines.pop(cursor_line + 1)
+        elif key == curses.KEY_UP:
+            if cursor_line > 0:
+                cursor_line -= 1
+                cursor_col = min(cursor_col, len(lines[cursor_line]))
+        elif key == curses.KEY_DOWN:
+            if cursor_line < len(lines) - 1:
+                cursor_line += 1
+                cursor_col = min(cursor_col, len(lines[cursor_line]))
+        elif key == curses.KEY_LEFT:
+            if cursor_col > 0:
+                cursor_col -= 1
+            elif cursor_line > 0:
+                cursor_line -= 1
+                cursor_col = len(lines[cursor_line])
+        elif key == curses.KEY_RIGHT:
+            if cursor_col < len(lines[cursor_line]):
+                cursor_col += 1
+            elif cursor_line < len(lines) - 1:
+                cursor_line += 1
+                cursor_col = 0
+        elif key == curses.KEY_HOME:
+            cursor_col = 0
+        elif key == curses.KEY_END:
+            cursor_col = len(lines[cursor_line])
+        elif key >= 32 and key <= 126:  # Printable ASCII
+            lines[cursor_line] = lines[cursor_line][:cursor_col] + chr(key) + lines[cursor_line][cursor_col:]
+            cursor_col += 1
+
+    curses.curs_set(0)
+    return '\n'.join(lines)
+
+
 def get_all_categories():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -139,19 +344,39 @@ def main(stdscr):
     max_tabs = 10
     current_indices = [0 for _ in tab_categories]
 
+    # fzf-style preview pane state
+    show_preview = True  # Preview pane visible by default
+    preview_scroll = 0   # Scroll offset within preview pane
+
     show_help = False
     help_lines = [
         "Available commands:",
         "",
-        "↑↓         Navigate between tasks",
-        "Enter      Mark/unmark task",
-        "a          Add new task",
-        "d          Delete selected task",
-        "Ctrl+T     New tab",
-        "Ctrl+W     Close tab",
-        "←/→        Switch tab",
-        "h          Show/hide help",
-        "q          Quit program",
+        "Navigation:",
+        "↑↓ / Ctrl+P/N  Navigate between tasks",
+        "Enter          Mark/unmark task (confirm)",
+        "←/→            Switch tab",
+        "",
+        "Preview pane:",
+        "Alt+P          Toggle preview pane",
+        "Alt+J/K        Scroll preview down/up",
+        "",
+        "Task management:",
+        "a              Add new task",
+        "d              Delete selected task",
+        "n              Edit notes for task",
+        "",
+        "Tabs:",
+        "Ctrl+T         New tab",
+        "Ctrl+W         Close tab",
+        "",
+        "Other:",
+        "h              Show/hide help",
+        "q              Quit program",
+        "",
+        "In notes editor:",
+        "Ctrl+F         Save notes",
+        "Esc            Cancel editing",
     ]
 
     while True:
@@ -214,10 +439,18 @@ def main(stdscr):
             tab_bar = " ".join(tab_strs)
             stdscr.addstr(title_box_y + title_box_h, max(0, (width - len(tab_bar)) // 2), tab_bar, curses.color_pair(2) | curses.A_BOLD)
 
-            # Main tab box
-            box_w = min(50, width - 4)
-            box_h = min(max(10, len(tabs[current_tab]) + 5), height - title_box_h - 7)
-            box_x = (width - box_w) // 2
+            # Calculate available space for task box and detail panel
+            available_height = height - title_box_h - 6  # Leave room for help hint
+            if show_preview:
+                box_h = 8  # Shorter fixed height for task box when preview is shown
+                detail_panel_h = max(10, available_height - box_h - 1)  # Detail panel gets remaining space
+            else:
+                box_h = available_height  # Task box takes all space when preview is hidden
+                detail_panel_h = 0
+
+            # Main tab box (same width as title box)
+            box_w = title_box_w
+            box_x = title_box_x
             box_y = title_box_y + title_box_h + 2
             draw_rounded_box(stdscr, box_y, box_x, box_h, box_w)
             todos = tabs[current_tab]
@@ -225,7 +458,7 @@ def main(stdscr):
             if current_indices[current_tab] >= len(todos):
                 current_indices[current_tab] = max(0, len(todos) - 1)
             current_index = current_indices[current_tab]
-            # SCROLL
+            # SCROLL for tasks
             max_visible = max(1, box_h - 4)
             if len(todos) > max_visible:
                 if current_index < max_visible // 2:
@@ -244,18 +477,128 @@ def main(stdscr):
                 msg_x = box_x + ((box_w - len(msg)) // 2)
                 stdscr.addstr(msg_y, msg_x, msg, curses.color_pair(2) | curses.A_BOLD)
             elif len(todos) > 0:
+                display_line = 0
+                text_width = box_w - 4  # Account for border and padding
+                indent = "    "  # Indent for wrapped lines (same width as prefix)
                 for idx, i in enumerate(range(start, end)):
-                    if 0 <= i < len(todos):
+                    if 0 <= i < len(todos) and display_line < max_visible:
                         todo = todos[i]
                         prefix = "[X] " if todo['done'] else "[ ] "
-                        line = prefix + todo['text']
                         attr = curses.color_pair(2) | curses.A_BOLD if i == current_index else 0
-                        stdscr.addstr(box_y + 2 + idx, box_x + 2, line[:box_w-4], attr)
-            # Scroll indicators
+                        # Wrap the todo text
+                        wrapped_lines = wrap_text(todo['text'], text_width - len(prefix))
+                        for line_idx, line_text in enumerate(wrapped_lines):
+                            if display_line >= max_visible:
+                                break
+                            if line_idx == 0:
+                                line = prefix + line_text
+                            else:
+                                line = indent + line_text
+                            stdscr.addstr(box_y + 2 + display_line, box_x + 2, line[:text_width], attr)
+                            display_line += 1
+            # Scroll indicators for tasks (on the right side)
             if start > 0:
                 stdscr.addstr(box_y + 1, box_x + box_w - 3, '↑', curses.color_pair(2) | curses.A_BOLD)
             if end < len(todos):
                 stdscr.addstr(box_y + box_h - 2, box_x + box_w - 3, '↓', curses.color_pair(2) | curses.A_BOLD)
+
+            # Detail panel below task box (only if preview is enabled)
+            if show_preview and detail_panel_h > 0:
+                detail_y = box_y + box_h + 1
+                detail_w = box_w
+                detail_x = box_x
+                draw_rounded_box(stdscr, detail_y, detail_x, detail_panel_h, detail_w)
+
+            if show_preview and detail_panel_h > 0 and len(todos) > 0 and 0 <= current_index < len(todos):
+                selected_todo = todos[current_index]
+                detail_text_w = detail_w - 4
+
+                # Show task name at top of detail panel (with wrapping)
+                task_label = "Task: "
+                task_text = selected_todo['text']
+                stdscr.addstr(detail_y + 1, detail_x + 2, task_label, curses.color_pair(3) | curses.A_BOLD)
+
+                # Wrap the task title
+                task_wrapped = wrap_text(task_text, detail_text_w - len(task_label))
+                task_display_lines = 0
+                for i, line in enumerate(task_wrapped[:2]):  # Max 2 lines for task title
+                    if i == 0:
+                        stdscr.addstr(detail_y + 1, detail_x + 2 + len(task_label), line)
+                    else:
+                        stdscr.addstr(detail_y + 1 + i, detail_x + 2, " " * len(task_label) + line)
+                    task_display_lines += 1
+
+                # Created date
+                created_y = detail_y + 1 + task_display_lines
+                created_label = "Created: "
+                created_at = selected_todo.get('created_at', '')
+                if created_at:
+                    stdscr.addstr(created_y, detail_x + 2, created_label, curses.color_pair(4) | curses.A_BOLD)
+                    stdscr.addstr(created_y, detail_x + 2 + len(created_label), created_at)
+                else:
+                    stdscr.addstr(created_y, detail_x + 2, created_label, curses.color_pair(4) | curses.A_BOLD)
+                    stdscr.addstr(created_y, detail_x + 2 + len(created_label), "(unknown)")
+
+                # Separator line
+                sep_y = created_y + 1
+                stdscr.addstr(sep_y, detail_x + 2, H * (detail_text_w), curses.color_pair(1))
+
+                # Notes section with timestamp
+                note_updated_at = selected_todo.get('note_updated_at', '')
+                if note_updated_at:
+                    notes_label = f"Notes: (edited {note_updated_at}) - press 'n' to edit"
+                else:
+                    notes_label = "Notes: (press 'n' to edit)"
+                # Truncate if too long
+                notes_label = notes_label[:detail_text_w]
+                stdscr.addstr(sep_y + 1, detail_x + 2, notes_label, curses.color_pair(2) | curses.A_BOLD)
+
+                # Calculate notes area
+                notes_start_y = sep_y + 2
+                max_notes_lines = detail_panel_h - (notes_start_y - detail_y) - 1  # Lines available for notes
+
+                # Build all wrapped notes lines
+                notes = selected_todo.get('notes', '')
+                all_notes_lines = []
+                if notes:
+                    for note_line in notes.split('\n'):
+                        wrapped = wrap_text(note_line, detail_text_w) if note_line else ['']
+                        all_notes_lines.extend(wrapped)
+
+                # Display notes with scrolling (controlled by preview_scroll via Alt-j/Alt-k)
+                if all_notes_lines:
+                    total_notes_lines = len(all_notes_lines)
+                    # Clamp preview_scroll to valid range
+                    max_scroll = max(0, total_notes_lines - max_notes_lines)
+                    if preview_scroll > max_scroll:
+                        preview_scroll = max_scroll
+                    if preview_scroll < 0:
+                        preview_scroll = 0
+
+                    notes_start = preview_scroll
+                    notes_end = min(notes_start + max_notes_lines, total_notes_lines)
+
+                    for i, line in enumerate(all_notes_lines[notes_start:notes_end]):
+                        stdscr.addstr(notes_start_y + i, detail_x + 2, line)
+
+                    # Scroll indicators for notes (on the right side)
+                    if notes_start > 0:
+                        stdscr.addstr(notes_start_y, detail_x + detail_w - 3, '↑', curses.color_pair(2) | curses.A_BOLD)
+                    if notes_end < total_notes_lines:
+                        stdscr.addstr(notes_start_y + max_notes_lines - 1, detail_x + detail_w - 3, '↓', curses.color_pair(2) | curses.A_BOLD)
+                else:
+                    stdscr.addstr(notes_start_y, detail_x + 2, "(no notes)", curses.color_pair(1))
+
+                # Mini guide embedded in the bottom border of detail panel (centered)
+                guide_text = " Alt-j/k: scroll │ Alt-p: toggle "
+                guide_x = detail_x + (detail_w - len(guide_text)) // 2
+                guide_y = detail_y + detail_panel_h - 1  # On the bottom border line
+                stdscr.addstr(guide_y, guide_x, guide_text, curses.color_pair(1))
+
+            elif show_preview and detail_panel_h > 0:
+                # No task selected
+                msg = "Select a task to view details"
+                stdscr.addstr(detail_y + detail_panel_h // 2, detail_x + (detail_w - len(msg)) // 2, msg, curses.color_pair(1))
 
         # Minimal help command
         help_hint = "Press 'h' for help"
@@ -264,16 +607,42 @@ def main(stdscr):
         stdscr.refresh()
         key = stdscr.getch()
 
+        # Handle Alt key combinations (ESC followed by another key)
+        if key == 27:  # ESC - could be escape or start of Alt sequence
+            stdscr.nodelay(True)
+            next_key = stdscr.getch()
+            stdscr.nodelay(False)
+            if next_key == -1:
+                # Just ESC pressed, no action (or could be used elsewhere)
+                pass
+            elif next_key == ord('p'):
+                # Alt-p: toggle preview pane
+                show_preview = not show_preview
+                preview_scroll = 0  # Reset scroll when toggling
+            elif next_key == ord('j'):
+                # Alt-j: scroll preview pane down
+                if show_preview:
+                    preview_scroll += 1
+            elif next_key == ord('k'):
+                # Alt-k: scroll preview pane up
+                if show_preview and preview_scroll > 0:
+                    preview_scroll -= 1
+            continue  # Skip rest of key handling for Alt sequences
+
+        # Ctrl-n / Ctrl-p for task list navigation (fzf-style)
+        if key == 14:  # Ctrl+N - next task
+            if current_indices[current_tab] < len(tabs[current_tab]) - 1:
+                current_indices[current_tab] += 1
+                preview_scroll = 0  # Reset preview scroll when changing task
+        elif key == 16:  # Ctrl+P - previous task
+            if current_indices[current_tab] > 0:
+                current_indices[current_tab] -= 1
+                preview_scroll = 0  # Reset preview scroll when changing task
+
         # Tab shortcuts
-        if key == 20:  # Ctrl+T
+        elif key == 20:  # Ctrl+T
             if len(tabs) < max_tabs:
-                curses.echo()
-                prompt = "New category name: "
-                stdscr.addstr(height - 4, 2, " " * (width - 4))
-                stdscr.addstr(height - 4, 2, prompt, curses.A_BOLD)
-                stdscr.refresh()
-                cat = stdscr.getstr(height - 4, 2 + len(prompt), 20).decode().strip()
-                curses.noecho()
+                cat = get_wrapped_input(stdscr, height - 4, 2, width - 4, 1, "New category name: ").strip()
                 if cat and cat not in tab_categories:
                     remove_deleted_category(cat)
                     tab_categories.append(cat)
@@ -308,9 +677,11 @@ def main(stdscr):
         elif key == curses.KEY_UP:
             if current_indices[current_tab] > 0:
                 current_indices[current_tab] -= 1
+                preview_scroll = 0  # Reset preview scroll when changing task
         elif key == curses.KEY_DOWN:
             if current_indices[current_tab] < len(tabs[current_tab]) - 1:
                 current_indices[current_tab] += 1
+                preview_scroll = 0  # Reset preview scroll when changing task
         elif key == ord('\n') and tabs[current_tab]:
             todos = tabs[current_tab]
             idx = current_indices[current_tab]
@@ -320,21 +691,17 @@ def main(stdscr):
                 # Update tab list
                 tabs[current_tab] = load_todos(tab_categories[current_tab])
         elif key == ord('a'):
-            curses.echo()
-            prompt = "New task: "
             box_y = title_box_y + title_box_h + 2
-            box_x = (width - min(50, width - 4)) // 2
-            box_w = min(50, width - 4)
+            box_x = title_box_x
+            box_w = title_box_w
             box_h = min(max(10, len(tabs[current_tab]) + 5), height - title_box_h - 7)
-            stdscr.addstr(box_y + box_h - 2, box_x + 2, " " * (box_w - 4))
-            stdscr.addstr(box_y + box_h - 2, box_x + 2, prompt, curses.A_BOLD)
-            stdscr.refresh()
-            text = stdscr.getstr(box_y + box_h - 2, box_x + 2 + len(prompt), box_w - 4 - len(prompt)).decode()
+            input_width = box_w - 4
+            max_input_lines = 3  # Allow up to 3 lines for input
+            text = get_wrapped_input(stdscr, box_y + box_h - 4, box_x + 2, input_width, max_input_lines, "New task: ")
             if text.strip():
                 add_todo(text, tab_categories[current_tab])
                 tabs[current_tab] = load_todos(tab_categories[current_tab])
                 current_indices[current_tab] = len(tabs[current_tab]) - 1
-            curses.noecho()
         elif key == ord('d') and tabs[current_tab]:
             todos = tabs[current_tab]
             idx = current_indices[current_tab]
@@ -344,6 +711,44 @@ def main(stdscr):
                 # Adjust index so it does not exceed list size
                 if current_indices[current_tab] >= len(tabs[current_tab]):
                     current_indices[current_tab] = max(0, len(tabs[current_tab]) - 1)
+        elif key == ord('n') and tabs[current_tab]:
+            todos = tabs[current_tab]
+            idx = current_indices[current_tab]
+            if 0 <= idx < len(todos):
+                # Edit notes for selected task
+                selected_todo = todos[idx]
+                current_notes = selected_todo.get('notes', '')
+
+                # Calculate detail panel position (same as drawing code)
+                available_height = height - title_box_h - 6
+                box_h = 8  # Matches the task box height
+                detail_panel_h = max(10, available_height - box_h - 1)
+                detail_y = title_box_y + title_box_h + 2 + box_h + 1
+                detail_x = title_box_x
+                detail_w = title_box_w
+
+                # Calculate where notes editing area starts (after task title and separator)
+                notes_edit_y = detail_y + 4  # After task title (2 lines max) + separator + notes label
+                notes_edit_h = detail_panel_h - 6  # Leave room for header elements and bottom border
+
+                # Show editing hint
+                edit_hint = "Editing notes... (Ctrl+F to save, Esc to cancel)"
+                stdscr.addstr(detail_y + 3, detail_x + 2, edit_hint + " " * (detail_w - 4 - len(edit_hint)), curses.color_pair(3) | curses.A_BOLD)
+                stdscr.refresh()
+
+                # Edit notes in the detail panel area
+                new_notes = edit_multiline_text(
+                    stdscr,
+                    notes_edit_y,
+                    detail_x + 2,
+                    detail_w - 4,
+                    notes_edit_h,
+                    current_notes
+                )
+
+                if new_notes is not None:
+                    update_todo_notes(selected_todo['id'], new_notes)
+                    tabs[current_tab] = load_todos(tab_categories[current_tab])
 
 if __name__ == "__main__":
     try:
