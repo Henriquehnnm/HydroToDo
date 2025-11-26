@@ -196,7 +196,7 @@ def get_wrapped_input(stdscr, start_y, start_x, width, max_lines, prompt=""):
 
 
 def edit_multiline_text(stdscr, start_y, start_x, width, height, initial_text=""):
-    """Edit multiline text with basic navigation. Returns edited text or None if cancelled."""
+    """Edit multiline text with basic navigation and text wrapping. Returns edited text or None if cancelled."""
     curses.curs_set(2)  # Block cursor
     lines = initial_text.split('\n') if initial_text else ['']
     cursor_line = len(lines) - 1
@@ -204,23 +204,49 @@ def edit_multiline_text(stdscr, start_y, start_x, width, height, initial_text=""
     scroll_offset = 0
 
     while True:
+        # Build wrapped display lines with mapping back to original lines
+        display_lines = []  # List of (original_line_idx, text, start_col)
+        for line_idx, line in enumerate(lines):
+            if len(line) == 0:
+                display_lines.append((line_idx, '', 0))
+            else:
+                col = 0
+                while col < len(line):
+                    chunk = line[col:col + width]
+                    display_lines.append((line_idx, chunk, col))
+                    col += width
+                if len(line) % width == 0 and len(line) > 0:
+                    # Line exactly fills width, no extra empty line needed
+                    pass
+
+        # Find which display line the cursor is on
+        cursor_display_line = 0
+        for i, (line_idx, text, start_col) in enumerate(display_lines):
+            if line_idx == cursor_line:
+                if start_col <= cursor_col < start_col + width:
+                    cursor_display_line = i
+                    break
+                elif cursor_col >= start_col:
+                    cursor_display_line = i  # Keep updating until we pass it
+
         # Adjust scroll to keep cursor visible
-        if cursor_line < scroll_offset:
-            scroll_offset = cursor_line
-        elif cursor_line >= scroll_offset + height:
-            scroll_offset = cursor_line - height + 1
+        if cursor_display_line < scroll_offset:
+            scroll_offset = cursor_display_line
+        elif cursor_display_line >= scroll_offset + height:
+            scroll_offset = cursor_display_line - height + 1
 
         # Clear and draw the text area
         for i in range(height):
             stdscr.addstr(start_y + i, start_x, " " * width)
-            line_idx = scroll_offset + i
-            if line_idx < len(lines):
-                display_line = lines[line_idx][:width]
-                stdscr.addstr(start_y + i, start_x, display_line)
+            disp_idx = scroll_offset + i
+            if disp_idx < len(display_lines):
+                _, text, _ = display_lines[disp_idx]
+                stdscr.addstr(start_y + i, start_x, text)
 
         # Position cursor
-        screen_cursor_line = cursor_line - scroll_offset
-        screen_cursor_col = min(cursor_col, width - 1)
+        screen_cursor_line = cursor_display_line - scroll_offset
+        _, _, start_col = display_lines[cursor_display_line] if display_lines else (0, '', 0)
+        screen_cursor_col = cursor_col - start_col
         stdscr.move(start_y + screen_cursor_line, start_x + screen_cursor_col)
 
         stdscr.refresh()
@@ -563,10 +589,10 @@ def main(stdscr):
                 else:
                     stdscr.addstr(notes_start_y, detail_x + 2, "(no notes)", curses.color_pair(1))
 
-                # Mini guide at the bottom of detail panel (centered)
-                guide_text = "Alt-j/k: scroll │ Alt-p: toggle"
+                # Mini guide embedded in the bottom border of detail panel (centered)
+                guide_text = " Alt-j/k: scroll │ Alt-p: toggle "
                 guide_x = detail_x + (detail_w - len(guide_text)) // 2
-                guide_y = detail_y + detail_panel_h - 2
+                guide_y = detail_y + detail_panel_h - 1  # On the bottom border line
                 stdscr.addstr(guide_y, guide_x, guide_text, curses.color_pair(1))
 
             elif show_preview and detail_panel_h > 0:
@@ -703,7 +729,7 @@ def main(stdscr):
 
                 # Calculate where notes editing area starts (after task title and separator)
                 notes_edit_y = detail_y + 4  # After task title (2 lines max) + separator + notes label
-                notes_edit_h = detail_panel_h - 5  # Leave room for header elements
+                notes_edit_h = detail_panel_h - 6  # Leave room for header elements and bottom border
 
                 # Show editing hint
                 edit_hint = "Editing notes... (Ctrl+F to save, Esc to cancel)"
